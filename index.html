@@ -1,387 +1,189 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Face Tracker</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
-    body { 
-      background: #000;
-      overflow: hidden;
-      position: fixed;
-      width: 100%;
-      height: 100%;
-    }
-    
-    #videoContainer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: #000;
-    }
-    
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      transform: scaleX(-1);
-    }
-    
-    canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-    
-    #controls {
-      position: fixed;
-      bottom: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.8);
-      padding: 8px;
-      border-radius: 25px;
-      display: flex;
-      gap: 5px;
-      align-items: center;
-      z-index: 1000;
-      backdrop-filter: blur(10px);
-    }
-    
-    #settings {
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      background: rgba(0,0,0,0.8);
-      padding: 8px;
-      border-radius: 15px;
-      z-index: 1000;
-      backdrop-filter: blur(10px);
-    }
-    
-    #settings select {
-      padding: 6px 10px;
-      border: 1px solid rgba(255,255,255,0.3);
-      background: rgba(255,255,255,0.1);
-      color: white;
-      border-radius: 5px;
-      font-size: 12px;
-    }
-    
-    .btn {
-      padding: 10px 18px;
-      border: none;
-      border-radius: 20px;
-      font-size: 13px;
-      font-weight: bold;
-      cursor: pointer;
-      transition: all 0.2s;
-      white-space: nowrap;
-    }
-    
-    .btn:active { transform: scale(0.95); }
-    .btn-start { background: #00ff88; color: #000; }
-    .btn-stop { background: #ff4757; color: white; }
-    .btn-reset { background: #ffa502; color: white; }
-    
-    #status {
-      position: fixed;
-      top: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.85);
-      color: #00ff88;
-      padding: 6px 12px;
-      border-radius: 15px;
-      font-size: 11px;
-      z-index: 1000;
-    }
-    
-    .bridge-warning {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0,0,0,0.95);
-      padding: 30px;
-      border-radius: 15px;
-      z-index: 2000;
-      max-width: 90%;
-      text-align: center;
-      color: white;
-      display: none;
-    }
-    
-    .bridge-warning h2 {
-      color: #ffa502;
-      margin-bottom: 15px;
-    }
-    
-    .bridge-warning ol {
-      text-align: left;
-      margin: 15px 0;
-      line-height: 2;
-    }
-    
-    .bridge-warning button {
-      margin-top: 15px;
-      padding: 12px 25px;
-      background: #00ff88;
-      border: none;
-      border-radius: 8px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-  </style>
+    <title>Smart Face Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #videoContainer { position: absolute; width: 100%; height: 100%; }
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        
+        /* HUD Controls */
+        #hud {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 20px;
+            display: flex; flex-direction: column; gap: 10px; align-items: center;
+            color: #00ff88; backdrop-filter: blur(5px); z-index: 999;
+        }
+        .row { display: flex; gap: 10px; align-items: center; }
+        input[type="text"] { width: 100px; padding: 5px; border-radius: 5px; border: none; text-align: center; }
+        button { padding: 8px 20px; border-radius: 20px; border: none; font-weight: bold; cursor: pointer; }
+        .btn-go { background: #00ff88; color: #000; }
+        .btn-stop { background: #ff4757; color: #fff; }
+        label { font-size: 12px; color: white; display: flex; align-items: center; gap: 5px; }
+    </style>
 </head>
 <body>
-  <div id="videoContainer">
+
+<div id="videoContainer">
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
-  </div>
-  
-  <div id="settings">
-    <select id="cameraSelect">
-      <option value="user">Front</option>
-      <option value="environment">Back</option>
-    </select>
-  </div>
-  
-  <div id="status">Ready</div>
-  
-  <div id="controls">
-    <button class="btn btn-start" onclick="start()">▶ START</button>
-    <button class="btn btn-stop" onclick="stop()">⏹ STOP</button>
-    <button class="btn btn-reset" onclick="reset()">🔄 RESET</button>
-  </div>
+</div>
 
-  <div class="bridge-warning" id="bridgeWarning">
-    <h2>⚠️ Bridge App Required</h2>
-    <p>To connect to NodeMCU from Vercel, you need the Bridge App running on your computer.</p>
-    <ol>
-      <li>Open <strong>bridge.html</strong> on your computer (same WiFi as NodeMCU)</li>
-      <li>Enter NodeMCU IP address</li>
-      <li>Click <strong>START BRIDGE</strong></li>
-      <li>Keep it running in the background</li>
-      <li>Return here and click START</li>
-    </ol>
-    <button onclick="document.getElementById('bridgeWarning').style.display='none'">Got it!</button>
-  </div>
+<div id="hud">
+    <div class="row">
+        <input type="text" id="ip" placeholder="NodeMCU IP" value="192.168.0.105">
+        <input type="text" id="peerId" placeholder="Laptop ID (Optional)">
+    </div>
+    <div class="row">
+        <button class="btn-go" onclick="startTracking()">START</button>
+        <button class="btn-stop" onclick="stopTracking()">STOP</button>
+        <button style="background:#ffa502" onclick="resetMotor()">CENTER</button>
+    </div>
+    <div class="row">
+        <label><input type="checkbox" id="invertDir" checked> Invert Direction</label>
+        <div id="status">Ready</div>
+    </div>
+</div>
 
-  <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    let model, tracking = false;
-    let currentOrientation = 'portrait';
-    let lastUpdateTime = 0;
-    let bridgeChecked = false;
-    
-    function updateStatus(msg) {
-      document.getElementById('status').textContent = msg;
-    }
-    
-    function resizeCanvas() {
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
-    }
-    
-    function detectOrientation() {
-      currentOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
-    }
-    
-    window.addEventListener('resize', detectOrientation);
-    window.addEventListener('orientationchange', detectOrientation);
-    
-    async function sendCommand(type, data = {}) {
-      // Send command via localStorage (bridge will pick it up)
-      const command = {
-        type: type,
-        ...data,
-        timestamp: Date.now()
-      };
-      
-      localStorage.setItem('motorCommand', JSON.stringify(command));
-      
-      // Wait for response (with timeout)
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Bridge timeout'));
-        }, 2000);
-        
-        const checkResponse = setInterval(() => {
-          const responseData = localStorage.getItem('motorResponse');
-          if (responseData) {
-            try {
-              const response = JSON.parse(responseData);
-              if (Date.now() - response.timestamp < 2000) {
-                clearTimeout(timeout);
-                clearInterval(checkResponse);
-                localStorage.removeItem('motorResponse');
-                resolve(response);
-              }
-            } catch (e) {}
-          }
-        }, 50);
-      });
-    }
-    
-    async function checkBridge() {
-      try {
-        updateStatus('Checking bridge...');
-        const response = await sendCommand('status');
-        updateStatus('✓ Bridge connected');
-        return true;
-      } catch (e) {
-        updateStatus('❌ Bridge not running');
-        document.getElementById('bridgeWarning').style.display = 'block';
-        return false;
-      }
-    }
-    
-    async function start() {
-      // Check if bridge is running
-      if (!bridgeChecked) {
-        const connected = await checkBridge();
-        if (!connected) return;
-        bridgeChecked = true;
-      }
-      
-      updateStatus('Loading AI model...');
-      model = await blazeface.load();
-      
-      updateStatus('Starting camera...');
-      const facing = document.getElementById('cameraSelect').value;
-      
-      try {
+<script>
+    let model, video, canvas, ctx;
+    let isTracking = false;
+    let peer = null;
+    let motorPosition = 0; // Virtual position of motor (-100 to 100)
+    let lastRequestTime = 0;
+
+    // Initialize Video
+    async function setupCamera() {
+        video = document.getElementById('video');
+        canvas = document.getElementById('canvas');
+        ctx = canvas.getContext('2d');
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: facing,
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          },
-          audio: false
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: false
         });
-        
         video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          resizeCanvas();
-          detectOrientation();
-        };
         
-        // Start streaming for laptop viewer
-        startLocalStream();
+        return new Promise(resolve => {
+            video.onloadedmetadata = () => {
+                resize();
+                resolve();
+            };
+        });
+    }
+
+    // Handle Resize/Rotate
+    function resize() {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+    }
+    window.addEventListener('resize', resize);
+
+    async function startTracking() {
+        const ip = document.getElementById('ip').value;
+        const pId = document.getElementById('peerId').value;
+        if(!ip) return alert("Enter IP");
+
+        document.getElementById('status').innerText = "Loading AI...";
+        await setupCamera();
+        model = await blazeface.load();
         
-        tracking = true;
-        updateStatus('✓ Tracking');
-        detect();
-        
-      } catch (e) {
-        updateStatus('Camera error');
-        alert('Camera access denied!');
-      }
-    }
-    
-    function stop() {
-      tracking = false;
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(t => t.stop());
-      }
-      updateStatus('Stopped');
-    }
-    
-    async function reset() {
-      try {
-        await sendCommand('reset');
-        updateStatus('✓ Reset');
-      } catch (e) {
-        updateStatus('Reset failed');
-      }
-    }
-    
-    function startLocalStream() {
-      setInterval(() => {
-        if (tracking && canvas.width > 0) {
-          try {
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-            localStorage.setItem('faceTrackerStream', JSON.stringify({
-              image: dataUrl,
-              timestamp: Date.now()
-            }));
-          } catch (e) {}
+        // Start PeerJS Stream if ID provided
+        if(pId) {
+            peer = new Peer();
+            peer.on('open', () => {
+                peer.call(pId, video.srcObject);
+                document.getElementById('status').innerText = "Streaming Active";
+            });
         }
-      }, 100);
+
+        isTracking = true;
+        document.getElementById('status').innerText = "Tracking...";
+        detectLoop();
     }
-    
-    async function detect() {
-      if (!tracking) return;
-      
-      const predictions = await model.estimateFaces(video, false);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      if (predictions.length > 0) {
-        const face = predictions[0];
-        const start = face.topLeft;
-        const end = face.bottomRight;
-        const faceCenterX = (start[0] + end[0]) / 2;
-        const faceCenterY = (start[1] + end[1]) / 2;
+
+    function stopTracking() {
+        isTracking = false;
+        if(peer) peer.destroy();
+        document.getElementById('status').innerText = "Stopped";
+    }
+
+    function resetMotor() {
+        const ip = document.getElementById('ip').value;
+        fetch(`http://${ip}/reset`).catch(e=>{});
+        motorPosition = 0;
+    }
+
+    async function detectLoop() {
+        if(!isTracking) return;
+
+        const predictions = await model.estimateFaces(video, false);
         
-        const mirroredStartX = canvas.width - end[0];
-        const width = end[0] - start[0];
-        const height = end[1] - start[1];
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        ctx.strokeStyle = '#00ff88';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(mirroredStartX, start[1], width, height);
-        
-        let centerRef, facePos;
-        
-        if (currentOrientation === 'landscape') {
-          centerRef = canvas.height / 2;
-          facePos = faceCenterY;
-        } else {
-          centerRef = canvas.width / 2;
-          facePos = faceCenterX;
+        if (predictions.length > 0) {
+            const face = predictions[0];
+            const start = face.topLeft;
+            const end = face.bottomRight;
+            
+            // Draw Box
+            ctx.strokeStyle = "#00ff88";
+            ctx.lineWidth = 4;
+            ctx.strokeRect(start[0], start[1], end[0] - start[0], end[1] - start[1]);
+
+            // --- SMART TRACKING LOGIC ---
+            
+            // 1. Calculate Center dynamically (works for any orientation)
+            const screenCenter = canvas.width / 2;
+            const faceCenter = (start[0] + end[0]) / 2;
+            
+            // 2. Calculate Deviation (Error)
+            const error = faceCenter - screenCenter;
+            
+            // 3. Deadzone (Don't move if user is roughly centered)
+            if (Math.abs(error) > 30) {
+                
+                // 4. Proportional Movement Calculation
+                // If error is small (walking), move 1 step.
+                // If error is large (running), move 5 steps.
+                let stepSize = Math.floor(Math.abs(error) / 40); 
+                if (stepSize > 5) stepSize = 5; // Max jump limit
+                if (stepSize < 1) stepSize = 1;
+
+                // 5. Determine Direction
+                const invert = document.getElementById('invertDir').checked;
+                let direction = (error > 0) ? 1 : -1; 
+                
+                // NOTE: blazeface coordinates are not mirrored, but CSS is.
+                // Usually: Face > Center means face is on Right.
+                // We need to move Right (+).
+                if(invert) direction *= -1;
+
+                // 6. Update Virtual Motor Position
+                motorPosition += (direction * stepSize);
+
+                // Clamp to limits (-100 to 100)
+                if (motorPosition > 100) motorPosition = 100;
+                if (motorPosition < -100) motorPosition = -100;
+
+                // 7. Send Command (Throttled to prevent flooding WiFi)
+                const now = Date.now();
+                if (now - lastRequestTime > 50) { // Max 20 commands per second
+                    const ip = document.getElementById('ip').value;
+                    // Send absolute target to NodeMCU
+                    fetch(`http://${ip}/update?target=${motorPosition}`, {mode: 'no-cors'}).catch(()=>{});
+                    lastRequestTime = now;
+                }
+            }
         }
-        
-        const error = facePos - centerRef;
-        const absError = Math.abs(error);
-        
-        const now = Date.now();
-        if (absError > 30 && now - lastUpdateTime > 100) {
-          let motorSteps = mapValue(error, -centerRef, centerRef, -50, 50);
-          motorSteps = -motorSteps;
-          
-          const targetPosition = Math.max(-50, Math.min(50, Math.round(motorSteps)));
-          
-          sendCommand('move', {
-            position: targetPosition,
-            speed: 1200
-          }).catch(() => {});
-          
-          lastUpdateTime = now;
-        }
-      } else {
-        ctx.fillStyle = 'rgba(255,71,87,0.2)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      
-      requestAnimationFrame(detect);
+
+        requestAnimationFrame(detectLoop);
     }
-    
-    function mapValue(x, in_min, in_max, out_min, out_max) {
-      return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-    }
-    
-    detectOrientation();
-  </script>
+</script>
 </body>
 </html>
