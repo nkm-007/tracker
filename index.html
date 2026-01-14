@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Face Tracker</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #000;
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+        height: 100%;
+      }
+
+      #videoContainer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+      }
+
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
+      }
+
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      #controls {
+        position: fixed;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        padding: 8px;
+        border-radius: 25px;
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        z-index: 1000;
+        backdrop-filter: blur(10px);
+      }
+
+      #settings {
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        padding: 8px 12px;
+        border-radius: 20px;
+        z-index: 1000;
+        backdrop-filter: blur(10px);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 12px;
+        color: white;
+      }
+
+      #settings input {
+        width: 120px;
+        padding: 5px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        border-radius: 5px;
+        font-size: 12px;
+      }
+
+      #settings select {
+        padding: 5px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        border-radius: 5px;
+        font-size: 12px;
+      }
+
+      .btn {
+        padding: 10px 18px;
+        border: none;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+      }
+
+      .btn:active {
+        transform: scale(0.95);
+      }
+      .btn-start {
+        background: #00ff88;
+        color: #000;
+      }
+      .btn-stop {
+        background: #ff4757;
+        color: white;
+      }
+      .btn-reset {
+        background: #ffa502;
+        color: white;
+      }
+
+      #status {
+        position: fixed;
+        top: 50px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: #00ff88;
+        padding: 6px 12px;
+        border-radius: 15px;
+        font-size: 11px;
+        z-index: 1000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="videoContainer">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="settings">
+      <input
+        type="text"
+        id="nodeMcuIP"
+        placeholder="NodeMCU IP"
+        value="192.168.0.101"
+      />
+      <select id="cameraSelect">
+        <option value="user">Front</option>
+        <option value="environment">Back</option>
+      </select>
+    </div>
+
+    <div id="status">Ready</div>
+
+    <div id="controls">
+      <button class="btn btn-start" onclick="start()">▶ START</button>
+      <button class="btn btn-stop" onclick="stop()">⏹ STOP</button>
+      <button class="btn btn-reset" onclick="reset()">🔄 RESET</button>
+    </div>
+
+    <script>
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      let model,
+        tracking = false,
+        ws = null;
+      let currentOrientation = "portrait";
+      let nodeMcuIP = "";
+
+      // WebSocket server for streaming
+      let wsServer = null;
+
+      function updateStatus(msg) {
+        document.getElementById("status").textContent = msg;
+      }
+
+      function resizeCanvas() {
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+      }
+
+      // Detect orientation
+      function detectOrientation() {
+        if (window.innerWidth > window.innerHeight) {
+          currentOrientation = "landscape";
+        } else {
+          currentOrientation = "portrait";
+        }
+      }
+
+      window.addEventListener("resize", detectOrientation);
+      window.addEventListener("orientationchange", detectOrientation);
+
+      async function start() {
+        nodeMcuIP = document.getElementById("nodeMcuIP").value.trim();
+        if (!nodeMcuIP) {
+          alert("Enter NodeMCU IP!");
+          return;
+        }
+
+        // Test connection
+        try {
+          await fetch(`http://${nodeMcuIP}/status`);
+        } catch (e) {
+          alert("Cannot connect to NodeMCU!");
+          return;
+        }
+
+        updateStatus("Loading model...");
+        model = await blazeface.load();
+
+        updateStatus("Starting camera...");
+        const facing = document.getElementById("cameraSelect").value;
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: facing,
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          });
+
+          video.srcObject = stream;
+          video.onloadedmetadata = () => {
+            resizeCanvas();
+            detectOrientation();
+          };
+
+          // Start WebSocket streaming
+          startWebSocketServer();
+
+          tracking = true;
+          updateStatus("✓ Tracking");
+          detect();
+        } catch (e) {
+          alert("Camera access denied!");
+        }
+      }
+
+      function stop() {
+        tracking = false;
+        if (video.srcObject) {
+          video.srcObject.getTracks().forEach((t) => t.stop());
+        }
+        if (ws) ws.close();
+        updateStatus("Stopped");
+      }
+
+      async function reset() {
+        if (!nodeMcuIP) return;
+        try {
+          await fetch(`http://${nodeMcuIP}/reset`);
+        } catch (e) {}
+      }
+
+      function startWebSocketServer() {
+        // Create simple WebSocket for streaming
+        // Using public WebSocket echo server for demo
+        // In production, host your own WebSocket server
+
+        // For now, we'll broadcast via localStorage (same network)
+        setInterval(() => {
+          if (tracking && canvas.width > 0) {
+            try {
+              const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+              localStorage.setItem(
+                "faceTrackerStream",
+                JSON.stringify({
+                  image: dataUrl,
+                  timestamp: Date.now(),
+                })
+              );
+            } catch (e) {
+              console.log("Stream error:", e);
+            }
+          }
+        }, 100); // 10 FPS streaming
+      }
+
+      async function detect() {
+        if (!tracking) return;
+
+        const predictions = await model.estimateFaces(video, false);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (predictions.length > 0) {
+          const face = predictions[0];
+          const start = face.topLeft;
+          const end = face.bottomRight;
+          const faceCenterX = (start[0] + end[0]) / 2;
+          const faceCenterY = (start[1] + end[1]) / 2;
+
+          // Draw box
+          const mirroredStartX = canvas.width - end[0];
+          const width = end[0] - start[0];
+          const height = end[1] - start[1];
+
+          ctx.strokeStyle = "#00ff88";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(mirroredStartX, start[1], width, height);
+
+          // Calculate screen center based on orientation
+          let centerRef, facePos;
+
+          if (currentOrientation === "landscape") {
+            // In landscape, track based on Y position (up/down becomes left/right)
+            centerRef = canvas.height / 2;
+            facePos = faceCenterY;
+          } else {
+            // In portrait, track based on X position
+            centerRef = canvas.width / 2;
+            facePos = faceCenterX;
+          }
+
+          const error = facePos - centerRef;
+          const absError = Math.abs(error);
+
+          if (absError > 30) {
+            // Map to motor steps (-50 to +50)
+            let motorSteps;
+
+            if (currentOrientation === "landscape") {
+              motorSteps = mapValue(error, -centerRef, centerRef, -50, 50);
+            } else {
+              motorSteps = mapValue(error, -centerRef, centerRef, -50, 50);
+            }
+
+            // INVERTED: Swap direction to fix clockwise issue
+            motorSteps = -motorSteps;
+
+            const targetPosition = Math.max(
+              -50,
+              Math.min(50, Math.round(motorSteps))
+            );
+            const speedDelay = 1200;
+
+            fetch(
+              `http://${nodeMcuIP}/moveto?position=${targetPosition}&speed=${speedDelay}`
+            ).catch(() => {});
+          }
+        } else {
+          ctx.fillStyle = "rgba(255,71,87,0.2)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        requestAnimationFrame(detect);
+      }
+
+      function mapValue(x, in_min, in_max, out_min, out_max) {
+        return (
+          ((x - in_min) * (out_max - out_min)) / (in_max - in_min) + out_min
+        );
+      }
+
+      detectOrientation();
+    </script>
+  </body>
+</html>

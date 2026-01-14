@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Stream Viewer - Laptop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #1a1a2e;
+        color: white;
+        font-family: Arial;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .header {
+        background: rgba(0, 0, 0, 0.8);
+        padding: 15px;
+        text-align: center;
+        border-bottom: 2px solid #00ff88;
+      }
+
+      .header h1 {
+        font-size: 24px;
+        margin: 0;
+      }
+
+      .viewer-container {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #000;
+        position: relative;
+      }
+
+      #streamCanvas {
+        max-width: 100%;
+        max-height: 100%;
+        border: 3px solid #00ff88;
+        border-radius: 10px;
+      }
+
+      .status {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.8);
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #ff4757;
+        animation: blink 1s infinite;
+      }
+
+      .status-dot.active {
+        background: #00ff88;
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 10px #00ff88;
+        }
+        50% {
+          box-shadow: 0 0 20px #00ff88;
+        }
+      }
+
+      @keyframes blink {
+        0%,
+        50%,
+        100% {
+          opacity: 1;
+        }
+        25%,
+        75% {
+          opacity: 0.3;
+        }
+      }
+
+      .info-panel {
+        background: rgba(0, 0, 0, 0.8);
+        padding: 15px;
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        font-size: 13px;
+      }
+
+      .info-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .info-item .label {
+        opacity: 0.7;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .info-item .value {
+        font-size: 18px;
+        font-weight: bold;
+        color: #00ff88;
+      }
+
+      .no-stream {
+        text-align: center;
+        padding: 40px;
+      }
+
+      .no-stream h2 {
+        font-size: 32px;
+        margin-bottom: 20px;
+        opacity: 0.5;
+      }
+
+      .no-stream p {
+        opacity: 0.7;
+        line-height: 1.8;
+      }
+
+      .instructions {
+        background: rgba(255, 255, 255, 0.05);
+        padding: 20px;
+        border-radius: 10px;
+        margin: 20px auto;
+        max-width: 600px;
+        text-align: left;
+      }
+
+      .instructions ol {
+        margin-left: 20px;
+        line-height: 2;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>💻 Stream Viewer</h1>
+    </div>
+
+    <div class="viewer-container">
+      <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Waiting for stream...</span>
+      </div>
+
+      <canvas id="streamCanvas"></canvas>
+
+      <div class="no-stream" id="noStream">
+        <h2>📱 No Stream Active</h2>
+        <div class="instructions">
+          <p><strong>How to start streaming:</strong></p>
+          <ol>
+            <li>Open <strong>Phone_Tracker.html</strong> on your phone</li>
+            <li>Enter NodeMCU IP address</li>
+            <li>Click <strong>START</strong></li>
+            <li>Keep this page open on your laptop</li>
+            <li>
+              Make sure both devices are on the
+              <strong>same WiFi network</strong>
+            </li>
+          </ol>
+          <p style="margin-top: 20px; font-size: 12px; opacity: 0.6">
+            Stream updates every 100ms. Both devices must have this HTML file
+            open.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-panel">
+      <div class="info-item">
+        <span class="label">Status</span>
+        <span class="value" id="streamStatus">Disconnected</span>
+      </div>
+      <div class="info-item">
+        <span class="label">FPS</span>
+        <span class="value" id="fps">0</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Latency</span>
+        <span class="value" id="latency">-</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Last Update</span>
+        <span class="value" id="lastUpdate">Never</span>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("streamCanvas");
+      const ctx = canvas.getContext("2d");
+      const statusDot = document.getElementById("statusDot");
+      const statusText = document.getElementById("statusText");
+      const noStream = document.getElementById("noStream");
+
+      let frameCount = 0;
+      let lastFpsUpdate = Date.now();
+      let isStreaming = false;
+      let lastFrameTime = 0;
+
+      // Poll localStorage for stream data
+      function checkForStream() {
+        try {
+          const streamData = localStorage.getItem("faceTrackerStream");
+
+          if (streamData) {
+            const data = JSON.parse(streamData);
+            const now = Date.now();
+            const age = now - data.timestamp;
+
+            // Only show if stream is recent (< 2 seconds old)
+            if (age < 2000) {
+              if (!isStreaming) {
+                isStreaming = true;
+                statusDot.classList.add("active");
+                statusText.textContent = "Stream active";
+                noStream.style.display = "none";
+                document.getElementById("streamStatus").textContent =
+                  "Connected";
+              }
+
+              // Draw frame
+              const img = new Image();
+              img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+
+                frameCount++;
+                lastFrameTime = data.timestamp;
+
+                // Update latency
+                document.getElementById("latency").textContent = age + "ms";
+
+                // Update last update time
+                const date = new Date(data.timestamp);
+                document.getElementById("lastUpdate").textContent =
+                  date.toLocaleTimeString();
+              };
+              img.src = data.image;
+            } else {
+              // Stream too old
+              if (isStreaming) {
+                isStreaming = false;
+                statusDot.classList.remove("active");
+                statusText.textContent = "Stream lost";
+                noStream.style.display = "block";
+                document.getElementById("streamStatus").textContent =
+                  "Disconnected";
+              }
+            }
+          }
+        } catch (e) {
+          console.log("Stream error:", e);
+        }
+      }
+
+      // Calculate FPS
+      setInterval(() => {
+        document.getElementById("fps").textContent = frameCount;
+        frameCount = 0;
+      }, 1000);
+
+      // Poll for stream updates
+      setInterval(checkForStream, 100);
+
+      // Initial message
+      console.log("📺 Stream Viewer Ready");
+      console.log("Waiting for phone to start streaming...");
+    </script>
+  </body>
+</html>
