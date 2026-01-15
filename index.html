@@ -1,70 +1,142 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Tracker Fixed</title>
+    <title>Xbot Clone</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
+        /* --- 1. MOBILE LAYOUT FIXES --- */
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; background: #000; font-family: sans-serif; overflow: hidden; height: 100vh; }
-        
-        #container { position: relative; width: 100%; height: 100%; }
+        body { 
+            margin: 0; padding: 0; background: #000; 
+            font-family: -apple-system, system-ui, sans-serif; 
+            overflow: hidden; 
+            height: 100vh; /* Fallback */
+            height: 100dvh; /* Dynamic height for mobile browsers */
+            width: 100vw;
+        }
+
+        #camera-view {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1;
+        }
         video { width: 100%; height: 100%; object-fit: cover; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
-        /* HUD */
-        #topBar {
-            position: absolute; top: 0; width: 100%; padding: 15px;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
-            color: #00ff88; font-weight: bold; display: flex; justify-content: space-between; z-index: 10;
-        }
-        #controls {
-            position: absolute; bottom: 0; width: 100%; padding: 30px 20px;
-            background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
-            display: flex; justify-content: space-between; align-items: center; z-index: 10;
+        /* --- 2. UI OVERLAY --- */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10; pointer-events: none; /* Let touches pass through to buttons */
+            display: flex; flex-direction: column; justify-content: space-between;
         }
 
-        /* Inputs & Buttons */
-        input { background: rgba(255,255,255,0.2); border: 1px solid #fff; padding: 8px; color: white; width: 120px; text-align: center; border-radius: 8px; }
-        
-        #shutterBtn {
-            width: 70px; height: 70px; border-radius: 50%; border: 4px solid white;
-            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        /* Top Bar */
+        .top-bar {
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            padding: 15px; pointer-events: auto;
+            display: flex; gap: 10px; align-items: center;
         }
-        #innerBtn { width: 55px; height: 55px; background: #ff4757; border-radius: 50%; transition: 0.2s; }
-        
-        .recording #innerBtn { width: 30px; height: 30px; border-radius: 5px; }
-        .icon-btn { font-size: 24px; background: none; border: none; cursor: pointer; }
+        .status-badge {
+            background: rgba(0,255,136,0.2); color: #00ff88;
+            padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: bold;
+            border: 1px solid rgba(0,255,136,0.3);
+        }
+        input.ip-box {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);
+            color: white; padding: 8px; border-radius: 6px; width: 110px;
+            font-size: 14px; text-align: center;
+        }
+
+        /* Bottom Controls */
+        .controls-area {
+            background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+            padding: 20px 20px 40px 20px; /* Extra padding for bottom safe area */
+            pointer-events: auto;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+
+        /* Target Toggle */
+        .toggle-btn {
+            background: rgba(255,255,255,0.15); color: white;
+            border: none; padding: 10px 15px; border-radius: 20px;
+            font-size: 13px; font-weight: 600; backdrop-filter: blur(4px);
+        }
+
+        /* Shutter Button */
+        .shutter-outer {
+            width: 76px; height: 76px; border-radius: 50%;
+            border: 4px solid white; display: flex; align-items: center; justify-content: center;
+            transition: 0.2s;
+        }
+        .shutter-inner {
+            width: 60px; height: 60px; background: #ff4757; border-radius: 50%;
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .recording .shutter-outer { border-color: #ff4757; transform: scale(1.1); }
+        .recording .shutter-inner { width: 30px; height: 30px; border-radius: 4px; }
+
+        /* Icon Button */
+        .icon-btn {
+            background: none; border: none; font-size: 24px; color: white;
+            width: 44px; height: 44px; border-radius: 50%;
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(4px);
+        }
+
+        /* Tracking Box Visual */
+        .center-line {
+            position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+            background: rgba(255,255,255,0.1); transform: translateX(-50%);
+        }
+        .deadzone {
+            position: absolute; left: 50%; top: 0; bottom: 0; width: 20%;
+            background: rgba(0,255,136,0.05); transform: translateX(-50%);
+            border-left: 1px dashed rgba(0,255,136,0.3);
+            border-right: 1px dashed rgba(0,255,136,0.3);
+        }
     </style>
 </head>
 <body>
 
-<div id="container">
+<div id="camera-view">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
+    <div class="center-line"></div>
+    <div class="deadzone"></div>
+</div>
 
-    <div id="topBar">
-        <div id="status">Loading AI...</div>
-        <input type="text" id="ip" placeholder="Type IP Here" value="192.168.">
+<div id="ui-layer">
+    <div class="top-bar">
+        <div id="status" class="status-badge">AI LOADING...</div>
+        <input type="text" id="ip" class="ip-box" placeholder="NodeMCU IP" value="192.168.0.">
     </div>
 
-    <div id="controls">
-        <button class="icon-btn" onclick="centerMotor()">🎯</button>
-        <div id="shutterBtn" onclick="toggleRec()"><div id="innerBtn"></div></div>
-        <button class="icon-btn" onclick="switchCam()">📷</button>
+    <div class="controls-area">
+        <button class="toggle-btn" id="targetBtn" onclick="toggleTarget()">
+            🎯 <span id="targetLabel">PERSON</span>
+        </button>
+
+        <div class="shutter-outer" id="shutter" onclick="toggleRecord()">
+            <div class="shutter-inner"></div>
+        </div>
+
+        <button class="icon-btn" onclick="switchCam()">🔄</button>
     </div>
 </div>
 
 <script>
     let video, canvas, ctx, model;
     let isTracking = false;
-    let lastTime = 0;
+    let lastReq = 0;
     
     // Recording
     let mediaRecorder, chunks = [];
     let stream, facing = 'environment';
+    
+    // Settings
+    let targetType = 'person'; // 'person' or 'sports ball'
 
+    // --- 1. INITIALIZATION ---
     async function init() {
         video = document.getElementById('video');
         canvas = document.getElementById('canvas');
@@ -72,14 +144,16 @@
         
         await startCam();
         
+        // Load AI
         model = await cocoSsd.load();
-        document.getElementById('status').innerText = "AI Ready - Enter IP";
+        document.getElementById('status').innerText = "READY";
         
-        loop();
+        // Start Loop
+        trackLoop();
     }
 
     async function startCam() {
-        if(stream) stream.getTracks().forEach(t=>t.stop());
+        if(stream) stream.getTracks().forEach(t => t.stop());
         stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
             audio: false
@@ -91,17 +165,30 @@
         }
     }
 
+    // --- 2. CONTROLS ---
+    function toggleTarget() {
+        if(targetType === 'person') {
+            targetType = 'sports ball';
+            document.getElementById('targetLabel').innerText = "BALL";
+        } else {
+            targetType = 'person';
+            document.getElementById('targetLabel').innerText = "PERSON";
+        }
+    }
+
     function switchCam() {
-        facing = facing==='user'?'environment':'user';
+        facing = facing === 'user' ? 'environment' : 'user';
         startCam();
     }
 
-    function toggleRec() {
-        const btn = document.getElementById('shutterBtn');
+    function toggleRecord() {
+        const btn = document.getElementById('shutter');
+        
         if(!isTracking) {
+            // START
             isTracking = true;
             btn.classList.add('recording');
-            document.getElementById('status').innerText = "TRACKING & RECORDING";
+            document.getElementById('status').innerText = "TRACKING...";
             chunks = [];
             
             try { mediaRecorder = new MediaRecorder(stream, {mimeType: 'video/webm;codecs=vp9'}); }
@@ -110,80 +197,88 @@
             mediaRecorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
             mediaRecorder.onstop = saveVideo;
             mediaRecorder.start();
+            
         } else {
+            // STOP
             isTracking = false;
             btn.classList.remove('recording');
-            document.getElementById('status').innerText = "Saving...";
+            document.getElementById('status').innerText = "SAVING...";
             mediaRecorder.stop();
         }
     }
 
     async function saveVideo() {
         const blob = new Blob(chunks, {type: 'video/mp4'});
-        const file = new File([blob], "tracking.mp4", {type:'video/mp4'});
+        const file = new File([blob], "match_clip.mp4", {type:'video/mp4'});
         if(navigator.canShare && navigator.share) {
-            try { await navigator.share({files:[file], title:'Video'}); } catch(e){}
+            try { await navigator.share({files:[file]}); } catch(e){}
         } else {
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = "video.mp4";
+            a.download = "match_clip.mp4";
             a.click();
         }
-        document.getElementById('status').innerText = "Ready";
+        document.getElementById('status').innerText = "READY";
     }
 
-    async function loop() {
-        requestAnimationFrame(loop);
+    // --- 3. INTELLIGENT TRACKING LOOP ---
+    async function trackLoop() {
+        requestAnimationFrame(trackLoop);
         if(!isTracking || !model) return;
 
-        const preds = await model.detect(video);
-        const person = preds.find(p => p.class === 'person' && p.score > 0.5);
+        // Detect
+        const predictions = await model.detect(video);
+        
+        // Filter for specific target
+        // We lower the threshold for balls because they are small
+        const threshold = targetType === 'sports ball' ? 0.4 : 0.6;
+        const target = predictions.find(p => p.class === targetType && p.score > threshold);
 
         ctx.clearRect(0,0,canvas.width,canvas.height);
 
-        if(person) {
-            ctx.strokeStyle = "#00ff88"; ctx.lineWidth = 4;
-            ctx.strokeRect(...person.bbox);
+        if(target) {
+            // Draw Box
+            ctx.strokeStyle = "#00ff88"; ctx.lineWidth = 3;
+            ctx.strokeRect(...target.bbox);
 
-            const x = person.bbox[0];
-            const w = person.bbox[2];
-            const center = x + w/2;
-            const screenCenter = canvas.width/2;
-            const error = center - screenCenter;
+            // --- PROPORTIONAL CONTROL LOGIC ---
+            const x = target.bbox[0];
+            const w = target.bbox[2];
+            const centerX = x + (w/2);
+            
+            const screenW = canvas.width;
+            const screenCenter = screenW / 2;
+            const error = centerX - screenCenter; // +/- distance from center
 
-            // DEADZONE: Must move more than 60px to trigger motor
-            if(Math.abs(error) > 60) {
-                // Determine steps based on distance
-                let steps = Math.floor(error / 8); 
-                
-                // --- DIRECTION FIX ---
-                // If it was moving opposite, we multiply by -1.
-                // CURRENT SETTING: Inverted
-                steps = steps * -1; 
-                
-                // Send command
-                send(steps);
+            // DEADZONE: 10% of screen width (5% each side)
+            // If ball is inside this zone, DO NOT MOVE.
+            const deadzone = screenW * 0.1; 
+            
+            if (Math.abs(error) > deadzone) {
+                // Determine Speed based on how far the ball is
+                // Divisor 10: Smooth/Slow. Divisor 4: Fast/Jerky.
+                let steps = Math.floor(error / 12); 
+
+                // Clamp Max Speed (prevent crazy spins)
+                if (steps > 25) steps = 25;
+                if (steps < -25) steps = -25;
+
+                // Orientation Fix
+                if (facing === 'user') steps = -steps; 
+
+                sendToMotor(steps);
             }
         }
     }
 
-    function send(steps) {
+    function sendToMotor(steps) {
         const now = Date.now();
-        // Throttle: Only send every 150ms to prevent Timeouts
-        if(now - lastTime > 150) {
+        // Throttle to 10 commands per second (100ms)
+        if(now - lastReq > 100) {
             const ip = document.getElementById('ip').value;
-            // Use 'no-cors' mode (fire and forget)
-            fetch(`http://${ip}/move?steps=${steps}`, {mode: 'no-cors'}).catch(e=>{
-                // If this fails, IP is wrong or NodeMCU is busy
-                console.log("Connect Error"); 
-            });
-            lastTime = now;
+            fetch(`http://${ip}/move?steps=${steps}`, {mode: 'no-cors'}).catch(e=>{});
+            lastReq = now;
         }
-    }
-
-    function centerMotor() {
-        const ip = document.getElementById('ip').value;
-        fetch(`http://${ip}/stop`, {mode: 'no-cors'});
     }
 
     init();
