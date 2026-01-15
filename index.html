@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Person Tracker</title>
+    <title>AI Sports Tracker</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -12,38 +12,43 @@
         video { width: 100%; height: 100%; object-fit: cover; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
         
-        /* Control Panel */
+        /* UI Overlay */
         #ui {
-            position: absolute; bottom: 30px; left: 0; width: 100%;
-            display: flex; flex-direction: column; align-items: center; gap: 15px;
-            z-index: 10;
+            position: absolute; bottom: 20px; left: 0; width: 100%;
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+            pointer-events: auto; z-index: 10;
         }
         
-        .panel {
-            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 20px;
+        .controls {
+            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 20px;
             backdrop-filter: blur(5px); display: flex; gap: 10px; align-items: center;
         }
 
-        input { 
-            padding: 10px; border-radius: 8px; border: none; 
-            width: 130px; text-align: center; background: rgba(255,255,255,0.9);
-        }
+        input { padding: 8px; border-radius: 5px; border: none; width: 120px; text-align: center; }
         
         button {
             padding: 10px 20px; border-radius: 25px; border: none;
             font-weight: bold; font-size: 14px; cursor: pointer;
+            transition: transform 0.1s;
         }
+        button:active { transform: scale(0.95); }
         
-        .btn-start { background: #00ff88; color: #000; }
-        .btn-rec { background: #ff4757; color: white; display: none; } /* Hidden until AI loads */
-        
-        .recording { animation: pulse 1.5s infinite; background: white; color: red; }
+        .btn-rec { background: #ff4757; color: white; display: flex; align-items: center; gap: 5px; }
+        .btn-rec.recording { background: white; color: #ff4757; animation: pulse 1s infinite; }
+        .btn-calib { background: #ffa502; color: white; }
         
         #status {
-            color: #00ff88; font-size: 14px; text-shadow: 0 2px 4px rgba(0,0,0,1);
-            background: rgba(0,0,0,0.5); padding: 5px 15px; border-radius: 15px;
+            color: #00ff88; font-size: 12px; background: rgba(0,0,0,0.7);
+            padding: 5px 10px; border-radius: 10px;
         }
-        
+
+        /* Camera Switcher */
+        #camSwitch {
+            position: absolute; top: 20px; right: 20px;
+            background: rgba(255,255,255,0.2); padding: 10px; border-radius: 50%;
+            cursor: pointer; z-index: 20; color: white;
+        }
+
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -52,40 +57,64 @@
 <div id="container">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
+    
+    <div id="camSwitch" onclick="switchCamera()">📷</div>
 
     <div id="ui">
-        <div id="status">Initializing AI...</div>
+        <div id="status">Loading AI Model...</div>
         
-        <div class="panel">
+        <div class="controls">
             <input type="text" id="ip" placeholder="NodeMCU IP" value="192.168.0.105">
-            <button class="btn-start" id="loadBtn" onclick="init()">Load Camera</button>
-            <button class="btn-rec" id="recBtn" onclick="toggleTracking()">● START REC</button>
+            <button class="btn-rec" id="recBtn" onclick="toggleRecording()">
+                <span id="recIcon">●</span> <span id="recText">REC & TRACK</span>
+            </button>
+            <button class="btn-calib" onclick="centerMotor()">🎯 Zero</button>
+        </div>
+        
+        <div style="color:gray; font-size:10px; margin-top:5px;">
+            Target: <select id="targetType" style="background:none; border:none; color:white;">
+                <option value="person">Person (Testing)</option>
+                <option value="sports ball">Football (Match)</option>
+            </select>
         </div>
     </div>
 </div>
 
 <script>
-    let video, canvas, ctx, model;
+    let video, canvas, ctx;
+    let model;
     let isTracking = false;
-    let lastRequestTime = 0;
+    let lastRequest = 0;
     
-    // Recording Variables
+    // Recording vars
     let mediaRecorder;
     let recordedChunks = [];
     let stream;
+    let facingMode = 'environment'; // Start with Back Camera
 
-    // 1. Setup Camera & Load AI
+    // 1. Initialize
     async function init() {
-        document.getElementById('status').innerText = "Requesting Camera...";
-        
         video = document.getElementById('video');
         canvas = document.getElementById('canvas');
         ctx = canvas.getContext('2d');
+        
+        // Load COCO-SSD (Better than Face API)
+        model = await cocoSsd.load();
+        document.getElementById('status').innerText = "AI Ready. Enter IP & Start.";
+        
+        startCamera();
+    }
 
-        // Get Back Camera (Environment)
+    async function startCamera() {
+        if(stream) stream.getTracks().forEach(t => t.stop());
+        
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false
+            video: { 
+                facingMode: facingMode,
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 } 
+            },
+            audio: false // Mute for performance, add true if you want sound
         });
         
         video.srcObject = stream;
@@ -93,141 +122,150 @@
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
         };
-
-        document.getElementById('status').innerText = "Loading AI (Person Only)...";
-        document.getElementById('loadBtn').style.display = "none";
-        
-        // Load COCO-SSD
-        model = await cocoSsd.load();
-        
-        document.getElementById('status').innerText = "Ready to Track";
-        document.getElementById('recBtn').style.display = "block";
     }
 
-    // 2. Start/Stop Logic
-    function toggleTracking() {
+    function switchCamera() {
+        facingMode = facingMode === 'user' ? 'environment' : 'user';
+        startCamera();
+    }
+
+    // 2. Recording Logic (Saves to Drive via Share Sheet)
+    function toggleRecording() {
         const btn = document.getElementById('recBtn');
+        const txt = document.getElementById('recText');
         
         if (!isTracking) {
             // START
             isTracking = true;
-            btn.innerText = "■ STOP & SAVE";
-            btn.classList.add('recording');
-            document.getElementById('status').innerText = "Tracking Active";
-            
-            // Start Recording
             recordedChunks = [];
+            
+            // Create Recorder
             try {
-                // Try high quality VP9, fall back to standard
                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
             } catch (e) {
-                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder = new MediaRecorder(stream); // Fallback
             }
-            
+
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) recordedChunks.push(e.data);
             };
-            
-            mediaRecorder.onstop = saveAndUpload;
+
+            mediaRecorder.onstop = saveVideo;
             mediaRecorder.start();
-            
-            // Start Loop
-            trackLoop();
-            
+
+            btn.classList.add('recording');
+            txt.innerText = "STOP & SAVE";
+            track(); // Start AI Loop
+
         } else {
             // STOP
             isTracking = false;
-            btn.innerText = "● START REC";
-            btn.classList.remove('recording');
-            document.getElementById('status').innerText = "Saving Video...";
-            
             mediaRecorder.stop();
+            btn.classList.remove('recording');
+            txt.innerText = "REC & TRACK";
+            document.getElementById('status').innerText = "Processing Video...";
         }
     }
 
-    // 3. Save to Drive (via Share Sheet)
-    async function saveAndUpload() {
+    async function saveVideo() {
         const blob = new Blob(recordedChunks, { type: 'video/mp4' });
-        const file = new File([blob], "person_tracking_test.mp4", { type: 'video/mp4' });
+        const file = new File([blob], "football_match.mp4", { type: 'video/mp4' });
 
+        // Use Native Share API (Works on Android/iOS)
         if (navigator.canShare && navigator.share) {
             try {
                 await navigator.share({
                     files: [file],
-                    title: 'Tracking Test',
-                    text: 'Video recorded from AI Tracker'
+                    title: 'Football Match',
+                    text: 'Recorded via AI Tracker'
                 });
-                document.getElementById('status').innerText = "Shared Successfully";
+                document.getElementById('status').innerText = "Saved!";
             } catch (err) {
-                document.getElementById('status').innerText = "Share cancelled";
+                // Fallback for desktop: Download directly
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "match_recording.mp4";
+                a.click();
             }
         } else {
-            // Desktop Fallback
+            // Fallback
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = "tracking_test.mp4";
+            a.href = url;
+            a.download = "match_recording.mp4";
             a.click();
-            document.getElementById('status').innerText = "Downloaded";
         }
     }
 
-    // 4. The AI Loop
-    async function trackLoop() {
+    // 3. AI Tracking Loop
+    async function track() {
         if (!isTracking) return;
 
-        // Detect Objects
+        // Detect objects
         const predictions = await model.detect(video);
+        const targetType = document.getElementById('targetType').value;
         
-        // Filter: Only look for "person"
-        const person = predictions.find(p => p.class === 'person' && p.score > 0.6);
+        // Filter for specific object (Person or Ball)
+        const target = predictions.find(p => p.class === targetType && p.score > 0.5);
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (person) {
+        if (target) {
             // Draw Box
             ctx.strokeStyle = "#00ff88";
             ctx.lineWidth = 4;
-            ctx.strokeRect(...person.bbox);
-
-            // Logic: Keep person in center
-            const x = person.bbox[0];
-            const width = person.bbox[2];
+            ctx.strokeRect(...target.bbox);
+            
+            // Calculate Movement
+            const x = target.bbox[0];
+            const width = target.bbox[2];
             const centerX = x + (width / 2);
+            
+            // Screen Center
             const screenCenter = canvas.width / 2;
             
-            const error = centerX - screenCenter; // Distance from center
-            
-            // DEADZONE: If error is small (<50px), ignore it to stop jitter
+            // Error: How far is the object from the center?
+            const error = centerX - screenCenter;
+
+            // DEADZONE: If within 50px of center, don't move (stability)
             if (Math.abs(error) > 50) {
                 
-                // SMOOTHNESS MATH:
-                // Divide error by 10. 
-                // Ex: Error 200px -> Move 20 steps (Fast)
-                // Ex: Error 60px -> Move 6 steps (Slow)
-                let steps = Math.floor(error / 10);
+                // SPEED CALCULATION:
+                // Far away (Error > 200) = Move Fast
+                // Close (Error < 100) = Move Slow
+                let motorSpeed = Math.floor(error / 10); 
                 
-                // Invert for Back Camera (Left on screen = Left in reality)
-                // If using Front Camera, you might need to multiply by -1
-                steps = -steps; 
+                // INVERT Logic:
+                // If using back camera, Left is Left.
+                // If using front camera, Left is Right (Mirrored).
+                if (facingMode === 'user') motorSpeed = -motorSpeed;
 
                 // Send to NodeMCU
-                sendCommand(steps);
+                sendToMotor(motorSpeed);
             }
         }
 
-        requestAnimationFrame(trackLoop);
+        requestAnimationFrame(track);
     }
 
-    function sendCommand(steps) {
+    function sendToMotor(steps) {
         const now = Date.now();
-        // Limit to 10 commands per second (100ms delay)
-        // This prevents choking the WiFi connection
-        if (now - lastRequestTime > 100) {
+        // Limit requests to 10 per second to prevent flooding WiFi
+        if (now - lastRequest > 100) {
             const ip = document.getElementById('ip').value;
-            fetch(`http://${ip}/move?steps=${steps}`, { mode: 'no-cors' }).catch(e => {});
-            lastRequestTime = now;
+            // Send relative move command
+            fetch(`http://${ip}/update?val=${steps}`).catch(e => console.log("Wifi Error"));
+            lastRequest = now;
         }
     }
+
+    function centerMotor() {
+        const ip = document.getElementById('ip').value;
+        fetch(`http://${ip}/reset`);
+    }
+
+    init();
 </script>
 </body>
 </html>
