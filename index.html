@@ -2,54 +2,105 @@
 <html>
 <head>
     <title>AI Sports Tracker</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
-        body { margin: 0; background: #000; font-family: sans-serif; overflow: hidden; }
-        #container { position: relative; width: 100vw; height: 100vh; }
+        /* --- MOBILE LAYOUT RESET --- */
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; background: #000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; height: 100dvh; width: 100vw; }
         
-        video { width: 100%; height: 100%; object-fit: cover; }
+        /* FULLSCREEN VIDEO CONTAINER */
+        #container { position: relative; width: 100%; height: 100%; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; display: block; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        
-        /* UI Overlay */
-        #ui {
-            position: absolute; bottom: 20px; left: 0; width: 100%;
-            display: flex; flex-direction: column; align-items: center; gap: 10px;
-            pointer-events: auto; z-index: 10;
-        }
-        
-        .controls {
-            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 20px;
-            backdrop-filter: blur(5px); display: flex; gap: 10px; align-items: center;
+
+        /* --- TOP BAR (Status & Settings) --- */
+        #topBar {
+            position: absolute; top: 0; left: 0; width: 100%;
+            padding: 15px 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            display: flex; justify-content: space-between; align-items: center;
+            z-index: 10; color: white;
         }
 
-        input { padding: 8px; border-radius: 5px; border: none; width: 120px; text-align: center; }
-        
-        button {
-            padding: 10px 20px; border-radius: 25px; border: none;
-            font-weight: bold; font-size: 14px; cursor: pointer;
-            transition: transform 0.1s;
-        }
-        button:active { transform: scale(0.95); }
-        
-        .btn-rec { background: #ff4757; color: white; display: flex; align-items: center; gap: 5px; }
-        .btn-rec.recording { background: white; color: #ff4757; animation: pulse 1s infinite; }
-        .btn-calib { background: #ffa502; color: white; }
-        
         #status {
-            color: #00ff88; font-size: 12px; background: rgba(0,0,0,0.7);
-            padding: 5px 10px; border-radius: 10px;
+            font-size: 13px; font-weight: 500; color: #00ff88;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+            display: flex; align-items: center; gap: 6px;
         }
 
-        /* Camera Switcher */
-        #camSwitch {
-            position: absolute; top: 20px; right: 20px;
-            background: rgba(255,255,255,0.2); padding: 10px; border-radius: 50%;
-            cursor: pointer; z-index: 20; color: white;
+        .settings-group { display: flex; gap: 10px; align-items: center; }
+
+        #ipInput {
+            background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+            color: white; padding: 6px 10px; border-radius: 8px; width: 110px;
+            font-size: 12px; text-align: center; outline: none; backdrop-filter: blur(4px);
+        }
+        #ipInput::placeholder { color: rgba(255,255,255,0.5); }
+
+        /* --- BOTTOM CONTROLS --- */
+        #controls {
+            position: absolute; bottom: 0; left: 0; width: 100%;
+            padding: 20px 20px 40px 20px; /* Extra padding for iPhone Home bar */
+            background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+            display: flex; justify-content: space-between; align-items: center;
+            z-index: 10;
         }
 
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        /* Target Selector (Left) */
+        .mode-select {
+            position: relative;
+            background: rgba(255,255,255,0.1); border-radius: 20px;
+            padding: 0 10px; backdrop-filter: blur(5px);
+        }
+        select {
+            appearance: none; background: transparent; border: none;
+            color: white; padding: 10px 5px; font-size: 13px; font-weight: bold;
+            outline: none; text-align: center;
+        }
+
+        /* Shutter Button (Center) */
+        #shutterBtn {
+            width: 72px; height: 72px;
+            border-radius: 50%;
+            border: 4px solid white;
+            background: transparent;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            display: flex; align-items: center; justify-content: center;
+        }
+        
+        #shutterBtn::after {
+            content: ''; width: 56px; height: 56px;
+            background: #ff4757; border-radius: 50%;
+            transition: all 0.2s;
+        }
+
+        /* Recording State */
+        #shutterBtn.recording { border-color: #ff4757; }
+        #shutterBtn.recording::after {
+            width: 30px; height: 30px; border-radius: 6px; /* Turns into a square stop button */
+        }
+
+        /* Utility Buttons (Right) */
+        .utility-group { display: flex; flex-direction: column; gap: 15px; align-items: center; }
+
+        .icon-btn {
+            background: rgba(255,255,255,0.15); border: none;
+            width: 40px; height: 40px; border-radius: 50%;
+            color: white; font-size: 18px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(5px); transition: background 0.2s;
+        }
+        .icon-btn:active { background: rgba(255,255,255,0.3); transform: scale(0.95); }
+
+        /* Pulse Animation for Recording Text */
+        @keyframes pulseDot { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        .rec-dot { width: 8px; height: 8px; background: #ff4757; border-radius: 50%; display: none; margin-right: 5px; }
+        .recording .rec-dot { display: inline-block; animation: pulseDot 1s infinite; }
+
     </style>
 </head>
 <body>
@@ -57,64 +108,70 @@
 <div id="container">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
-    
-    <div id="camSwitch" onclick="switchCamera()">📷</div>
 
-    <div id="ui">
-        <div id="status">Loading AI Model...</div>
-        
-        <div class="controls">
-            <input type="text" id="ip" placeholder="NodeMCU IP" value="192.168.0.105">
-            <button class="btn-rec" id="recBtn" onclick="toggleRecording()">
-                <span id="recIcon">●</span> <span id="recText">REC & TRACK</span>
-            </button>
-            <button class="btn-calib" onclick="centerMotor()">🎯 Zero</button>
+    <div id="topBar">
+        <div id="status"><span class="rec-dot"></span> <span id="statusText">Loading AI...</span></div>
+        <div class="settings-group">
+            <input type="text" id="ip" placeholder="NodeIP" value="192.168.0.105">
         </div>
-        
-        <div style="color:gray; font-size:10px; margin-top:5px;">
-            Target: <select id="targetType" style="background:none; border:none; color:white;">
-                <option value="person">Person (Testing)</option>
-                <option value="sports ball">Football (Match)</option>
+    </div>
+
+    <div id="controls">
+        <div class="mode-select">
+            <select id="targetType">
+                <option value="person">🧍 Person</option>
+                <option value="sports ball">⚽ Ball</option>
             </select>
+        </div>
+
+        <div id="shutterBtn" onclick="toggleTracking()"></div>
+
+        <div class="utility-group">
+            <button class="icon-btn" onclick="switchCamera()">📷</button>
+            <button class="icon-btn" onclick="centerMotor()" style="color:#ffa502">🎯</button>
         </div>
     </div>
 </div>
 
 <script>
-    let video, canvas, ctx;
-    let model;
+    let video, canvas, ctx, model;
     let isTracking = false;
-    let lastRequest = 0;
+    let lastRequestTime = 0;
     
-    // Recording vars
+    // Recording Variables
     let mediaRecorder;
     let recordedChunks = [];
     let stream;
-    let facingMode = 'environment'; // Start with Back Camera
+    let facingMode = 'environment'; // Default to Back Camera
 
     // 1. Initialize
     async function init() {
         video = document.getElementById('video');
         canvas = document.getElementById('canvas');
         ctx = canvas.getContext('2d');
-        
-        // Load COCO-SSD (Better than Face API)
+
+        // Setup Camera
+        await startCamera();
+
+        // Load AI
+        document.getElementById('statusText').innerText = "Loading Model...";
         model = await cocoSsd.load();
-        document.getElementById('status').innerText = "AI Ready. Enter IP & Start.";
+        document.getElementById('statusText').innerText = "Ready to Record";
         
-        startCamera();
+        // Start loop (it will idle until isTracking is true)
+        trackLoop();
     }
 
     async function startCamera() {
-        if(stream) stream.getTracks().forEach(t => t.stop());
-        
+        if (stream) stream.getTracks().forEach(t => t.stop());
+
         stream = await navigator.mediaDevices.getUserMedia({
             video: { 
                 facingMode: facingMode,
                 width: { ideal: 1280 }, 
                 height: { ideal: 720 } 
             },
-            audio: false // Mute for performance, add true if you want sound
+            audio: false 
         });
         
         video.srcObject = stream;
@@ -129,142 +186,123 @@
         startCamera();
     }
 
-    // 2. Recording Logic (Saves to Drive via Share Sheet)
-    function toggleRecording() {
-        const btn = document.getElementById('recBtn');
-        const txt = document.getElementById('recText');
+    // 2. Main Action: Toggle Recording + Tracking
+    function toggleTracking() {
+        const btn = document.getElementById('shutterBtn');
+        const status = document.getElementById('status');
+        const txt = document.getElementById('statusText');
         
         if (!isTracking) {
-            // START
+            // --- START ---
             isTracking = true;
-            recordedChunks = [];
+            btn.classList.add('recording');
+            status.classList.add('recording'); // Shows red dot
+            txt.innerText = "REC 00:00";
             
-            // Create Recorder
+            // Start Recording
+            recordedChunks = [];
             try {
                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
             } catch (e) {
-                mediaRecorder = new MediaRecorder(stream); // Fallback
+                mediaRecorder = new MediaRecorder(stream);
             }
-
+            
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) recordedChunks.push(e.data);
             };
-
-            mediaRecorder.onstop = saveVideo;
+            
+            mediaRecorder.onstop = saveAndShare;
             mediaRecorder.start();
 
-            btn.classList.add('recording');
-            txt.innerText = "STOP & SAVE";
-            track(); // Start AI Loop
-
         } else {
-            // STOP
+            // --- STOP ---
             isTracking = false;
-            mediaRecorder.stop();
             btn.classList.remove('recording');
-            txt.innerText = "REC & TRACK";
-            document.getElementById('status').innerText = "Processing Video...";
+            status.classList.remove('recording');
+            txt.innerText = "Saving Video...";
+            
+            mediaRecorder.stop();
         }
     }
 
-    async function saveVideo() {
+    // 3. Save & Share Logic
+    async function saveAndShare() {
         const blob = new Blob(recordedChunks, { type: 'video/mp4' });
-        const file = new File([blob], "football_match.mp4", { type: 'video/mp4' });
+        const file = new File([blob], "tracking_clip.mp4", { type: 'video/mp4' });
 
-        // Use Native Share API (Works on Android/iOS)
         if (navigator.canShare && navigator.share) {
             try {
                 await navigator.share({
                     files: [file],
-                    title: 'Football Match',
-                    text: 'Recorded via AI Tracker'
+                    title: 'Smart Tracker Clip',
+                    text: 'Recorded via NodeMCU Tracker'
                 });
-                document.getElementById('status').innerText = "Saved!";
+                document.getElementById('statusText').innerText = "Ready";
             } catch (err) {
-                // Fallback for desktop: Download directly
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = "match_recording.mp4";
-                a.click();
+                document.getElementById('statusText').innerText = "Ready"; // User cancelled share
             }
         } else {
-            // Fallback
-            const url = URL.createObjectURL(blob);
+            // Fallback for Desktop
             const a = document.createElement('a');
-            a.href = url;
-            a.download = "match_recording.mp4";
+            a.href = URL.createObjectURL(blob);
+            a.download = "tracking_clip.mp4";
             a.click();
+            document.getElementById('statusText').innerText = "Downloaded";
         }
     }
 
-    // 3. AI Tracking Loop
-    async function track() {
-        if (!isTracking) return;
+    // 4. AI Logic
+    async function trackLoop() {
+        requestAnimationFrame(trackLoop); // Keep loop running always for visuals
+        
+        if (!isTracking || !model) return; // Only process AI if tracking is ON
 
-        // Detect objects
         const predictions = await model.detect(video);
         const targetType = document.getElementById('targetType').value;
-        
-        // Filter for specific object (Person or Ball)
         const target = predictions.find(p => p.class === targetType && p.score > 0.5);
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (target) {
-            // Draw Box
+            // Draw Visuals
             ctx.strokeStyle = "#00ff88";
             ctx.lineWidth = 4;
             ctx.strokeRect(...target.bbox);
-            
-            // Calculate Movement
+
+            // Motor Logic
             const x = target.bbox[0];
             const width = target.bbox[2];
             const centerX = x + (width / 2);
-            
-            // Screen Center
             const screenCenter = canvas.width / 2;
-            
-            // Error: How far is the object from the center?
             const error = centerX - screenCenter;
 
-            // DEADZONE: If within 50px of center, don't move (stability)
+            // Send command if outside deadzone
             if (Math.abs(error) > 50) {
+                let steps = Math.floor(error / 10);
+                if (facingMode === 'user') steps = -steps; // Mirror fix
                 
-                // SPEED CALCULATION:
-                // Far away (Error > 200) = Move Fast
-                // Close (Error < 100) = Move Slow
-                let motorSpeed = Math.floor(error / 10); 
-                
-                // INVERT Logic:
-                // If using back camera, Left is Left.
-                // If using front camera, Left is Right (Mirrored).
-                if (facingMode === 'user') motorSpeed = -motorSpeed;
-
-                // Send to NodeMCU
-                sendToMotor(motorSpeed);
+                sendCommand(steps);
             }
         }
-
-        requestAnimationFrame(track);
     }
 
-    function sendToMotor(steps) {
+    function sendCommand(steps) {
         const now = Date.now();
-        // Limit requests to 10 per second to prevent flooding WiFi
-        if (now - lastRequest > 100) {
+        // Limit to 10 commands/sec
+        if (now - lastRequestTime > 100) {
             const ip = document.getElementById('ip').value;
-            // Send relative move command
-            fetch(`http://${ip}/update?val=${steps}`).catch(e => console.log("Wifi Error"));
-            lastRequest = now;
+            // Use no-cors to avoid errors, we just want to fire the request
+            fetch(`http://${ip}/move?steps=${steps}`, { mode: 'no-cors' }).catch(e => {});
+            lastRequestTime = now;
         }
     }
 
     function centerMotor() {
         const ip = document.getElementById('ip').value;
-        fetch(`http://${ip}/reset`);
+        fetch(`http://${ip}/stop`, { mode: 'no-cors' }).catch(e => {});
     }
 
+    // Boot up
     init();
 </script>
 </body>
