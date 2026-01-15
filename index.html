@@ -1,106 +1,41 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Sports Tracker</title>
+    <title>AI Tracker Fixed</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
-        /* --- MOBILE LAYOUT RESET --- */
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; background: #000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; height: 100dvh; width: 100vw; }
+        body { margin: 0; background: #000; font-family: sans-serif; overflow: hidden; height: 100vh; }
         
-        /* FULLSCREEN VIDEO CONTAINER */
-        #container { position: relative; width: 100%; height: 100%; background: #000; }
-        video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #container { position: relative; width: 100%; height: 100%; }
+        video { width: 100%; height: 100%; object-fit: cover; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
-        /* --- TOP BAR (Status & Settings) --- */
+        /* HUD */
         #topBar {
-            position: absolute; top: 0; left: 0; width: 100%;
-            padding: 15px 20px;
+            position: absolute; top: 0; width: 100%; padding: 15px;
             background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
-            display: flex; justify-content: space-between; align-items: center;
-            z-index: 10; color: white;
+            color: #00ff88; font-weight: bold; display: flex; justify-content: space-between; z-index: 10;
         }
-
-        #status {
-            font-size: 13px; font-weight: 500; color: #00ff88;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
-            display: flex; align-items: center; gap: 6px;
-        }
-
-        .settings-group { display: flex; gap: 10px; align-items: center; }
-
-        #ipInput {
-            background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
-            color: white; padding: 6px 10px; border-radius: 8px; width: 110px;
-            font-size: 12px; text-align: center; outline: none; backdrop-filter: blur(4px);
-        }
-        #ipInput::placeholder { color: rgba(255,255,255,0.5); }
-
-        /* --- BOTTOM CONTROLS --- */
         #controls {
-            position: absolute; bottom: 0; left: 0; width: 100%;
-            padding: 20px 20px 40px 20px; /* Extra padding for iPhone Home bar */
+            position: absolute; bottom: 0; width: 100%; padding: 30px 20px;
             background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
-            display: flex; justify-content: space-between; align-items: center;
-            z-index: 10;
+            display: flex; justify-content: space-between; align-items: center; z-index: 10;
         }
 
-        /* Target Selector (Left) */
-        .mode-select {
-            position: relative;
-            background: rgba(255,255,255,0.1); border-radius: 20px;
-            padding: 0 10px; backdrop-filter: blur(5px);
-        }
-        select {
-            appearance: none; background: transparent; border: none;
-            color: white; padding: 10px 5px; font-size: 13px; font-weight: bold;
-            outline: none; text-align: center;
-        }
-
-        /* Shutter Button (Center) */
-        #shutterBtn {
-            width: 72px; height: 72px;
-            border-radius: 50%;
-            border: 4px solid white;
-            background: transparent;
-            position: relative;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            display: flex; align-items: center; justify-content: center;
-        }
+        /* Inputs & Buttons */
+        input { background: rgba(255,255,255,0.2); border: 1px solid #fff; padding: 8px; color: white; width: 120px; text-align: center; border-radius: 8px; }
         
-        #shutterBtn::after {
-            content: ''; width: 56px; height: 56px;
-            background: #ff4757; border-radius: 50%;
-            transition: all 0.2s;
+        #shutterBtn {
+            width: 70px; height: 70px; border-radius: 50%; border: 4px solid white;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
         }
-
-        /* Recording State */
-        #shutterBtn.recording { border-color: #ff4757; }
-        #shutterBtn.recording::after {
-            width: 30px; height: 30px; border-radius: 6px; /* Turns into a square stop button */
-        }
-
-        /* Utility Buttons (Right) */
-        .utility-group { display: flex; flex-direction: column; gap: 15px; align-items: center; }
-
-        .icon-btn {
-            background: rgba(255,255,255,0.15); border: none;
-            width: 40px; height: 40px; border-radius: 50%;
-            color: white; font-size: 18px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            backdrop-filter: blur(5px); transition: background 0.2s;
-        }
-        .icon-btn:active { background: rgba(255,255,255,0.3); transform: scale(0.95); }
-
-        /* Pulse Animation for Recording Text */
-        @keyframes pulseDot { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-        .rec-dot { width: 8px; height: 8px; background: #ff4757; border-radius: 50%; display: none; margin-right: 5px; }
-        .recording .rec-dot { display: inline-block; animation: pulseDot 1s infinite; }
-
+        #innerBtn { width: 55px; height: 55px; background: #ff4757; border-radius: 50%; transition: 0.2s; }
+        
+        .recording #innerBtn { width: 30px; height: 30px; border-radius: 5px; }
+        .icon-btn { font-size: 24px; background: none; border: none; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -110,199 +45,147 @@
     <canvas id="canvas"></canvas>
 
     <div id="topBar">
-        <div id="status"><span class="rec-dot"></span> <span id="statusText">Loading AI...</span></div>
-        <div class="settings-group">
-            <input type="text" id="ip" placeholder="NodeIP" value="192.168.0.105">
-        </div>
+        <div id="status">Loading AI...</div>
+        <input type="text" id="ip" placeholder="Type IP Here" value="192.168.">
     </div>
 
     <div id="controls">
-        <div class="mode-select">
-            <select id="targetType">
-                <option value="person">🧍 Person</option>
-                <option value="sports ball">⚽ Ball</option>
-            </select>
-        </div>
-
-        <div id="shutterBtn" onclick="toggleTracking()"></div>
-
-        <div class="utility-group">
-            <button class="icon-btn" onclick="switchCamera()">📷</button>
-            <button class="icon-btn" onclick="centerMotor()" style="color:#ffa502">🎯</button>
-        </div>
+        <button class="icon-btn" onclick="centerMotor()">🎯</button>
+        <div id="shutterBtn" onclick="toggleRec()"><div id="innerBtn"></div></div>
+        <button class="icon-btn" onclick="switchCam()">📷</button>
     </div>
 </div>
 
 <script>
     let video, canvas, ctx, model;
     let isTracking = false;
-    let lastRequestTime = 0;
+    let lastTime = 0;
     
-    // Recording Variables
-    let mediaRecorder;
-    let recordedChunks = [];
-    let stream;
-    let facingMode = 'environment'; // Default to Back Camera
+    // Recording
+    let mediaRecorder, chunks = [];
+    let stream, facing = 'environment';
 
-    // 1. Initialize
     async function init() {
         video = document.getElementById('video');
         canvas = document.getElementById('canvas');
         ctx = canvas.getContext('2d');
-
-        // Setup Camera
-        await startCamera();
-
-        // Load AI
-        document.getElementById('statusText').innerText = "Loading Model...";
-        model = await cocoSsd.load();
-        document.getElementById('statusText').innerText = "Ready to Record";
         
-        // Start loop (it will idle until isTracking is true)
-        trackLoop();
+        await startCam();
+        
+        model = await cocoSsd.load();
+        document.getElementById('status').innerText = "AI Ready - Enter IP";
+        
+        loop();
     }
 
-    async function startCamera() {
-        if (stream) stream.getTracks().forEach(t => t.stop());
-
+    async function startCam() {
+        if(stream) stream.getTracks().forEach(t=>t.stop());
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { 
-                facingMode: facingMode,
-                width: { ideal: 1280 }, 
-                height: { ideal: 720 } 
-            },
-            audio: false 
+            video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
         });
-        
         video.srcObject = stream;
         video.onloadedmetadata = () => {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-        };
+        }
     }
 
-    function switchCamera() {
-        facingMode = facingMode === 'user' ? 'environment' : 'user';
-        startCamera();
+    function switchCam() {
+        facing = facing==='user'?'environment':'user';
+        startCam();
     }
 
-    // 2. Main Action: Toggle Recording + Tracking
-    function toggleTracking() {
+    function toggleRec() {
         const btn = document.getElementById('shutterBtn');
-        const status = document.getElementById('status');
-        const txt = document.getElementById('statusText');
-        
-        if (!isTracking) {
-            // --- START ---
+        if(!isTracking) {
             isTracking = true;
             btn.classList.add('recording');
-            status.classList.add('recording'); // Shows red dot
-            txt.innerText = "REC 00:00";
+            document.getElementById('status').innerText = "TRACKING & RECORDING";
+            chunks = [];
             
-            // Start Recording
-            recordedChunks = [];
-            try {
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-            } catch (e) {
-                mediaRecorder = new MediaRecorder(stream);
-            }
+            try { mediaRecorder = new MediaRecorder(stream, {mimeType: 'video/webm;codecs=vp9'}); }
+            catch(e) { mediaRecorder = new MediaRecorder(stream); }
             
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) recordedChunks.push(e.data);
-            };
-            
-            mediaRecorder.onstop = saveAndShare;
+            mediaRecorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+            mediaRecorder.onstop = saveVideo;
             mediaRecorder.start();
-
         } else {
-            // --- STOP ---
             isTracking = false;
             btn.classList.remove('recording');
-            status.classList.remove('recording');
-            txt.innerText = "Saving Video...";
-            
+            document.getElementById('status').innerText = "Saving...";
             mediaRecorder.stop();
         }
     }
 
-    // 3. Save & Share Logic
-    async function saveAndShare() {
-        const blob = new Blob(recordedChunks, { type: 'video/mp4' });
-        const file = new File([blob], "tracking_clip.mp4", { type: 'video/mp4' });
-
-        if (navigator.canShare && navigator.share) {
-            try {
-                await navigator.share({
-                    files: [file],
-                    title: 'Smart Tracker Clip',
-                    text: 'Recorded via NodeMCU Tracker'
-                });
-                document.getElementById('statusText').innerText = "Ready";
-            } catch (err) {
-                document.getElementById('statusText').innerText = "Ready"; // User cancelled share
-            }
+    async function saveVideo() {
+        const blob = new Blob(chunks, {type: 'video/mp4'});
+        const file = new File([blob], "tracking.mp4", {type:'video/mp4'});
+        if(navigator.canShare && navigator.share) {
+            try { await navigator.share({files:[file], title:'Video'}); } catch(e){}
         } else {
-            // Fallback for Desktop
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = "tracking_clip.mp4";
+            a.download = "video.mp4";
             a.click();
-            document.getElementById('statusText').innerText = "Downloaded";
         }
+        document.getElementById('status').innerText = "Ready";
     }
 
-    // 4. AI Logic
-    async function trackLoop() {
-        requestAnimationFrame(trackLoop); // Keep loop running always for visuals
-        
-        if (!isTracking || !model) return; // Only process AI if tracking is ON
+    async function loop() {
+        requestAnimationFrame(loop);
+        if(!isTracking || !model) return;
 
-        const predictions = await model.detect(video);
-        const targetType = document.getElementById('targetType').value;
-        const target = predictions.find(p => p.class === targetType && p.score > 0.5);
+        const preds = await model.detect(video);
+        const person = preds.find(p => p.class === 'person' && p.score > 0.5);
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0,0,canvas.width,canvas.height);
 
-        if (target) {
-            // Draw Visuals
-            ctx.strokeStyle = "#00ff88";
-            ctx.lineWidth = 4;
-            ctx.strokeRect(...target.bbox);
+        if(person) {
+            ctx.strokeStyle = "#00ff88"; ctx.lineWidth = 4;
+            ctx.strokeRect(...person.bbox);
 
-            // Motor Logic
-            const x = target.bbox[0];
-            const width = target.bbox[2];
-            const centerX = x + (width / 2);
-            const screenCenter = canvas.width / 2;
-            const error = centerX - screenCenter;
+            const x = person.bbox[0];
+            const w = person.bbox[2];
+            const center = x + w/2;
+            const screenCenter = canvas.width/2;
+            const error = center - screenCenter;
 
-            // Send command if outside deadzone
-            if (Math.abs(error) > 50) {
-                let steps = Math.floor(error / 10);
-                if (facingMode === 'user') steps = -steps; // Mirror fix
+            // DEADZONE: Must move more than 60px to trigger motor
+            if(Math.abs(error) > 60) {
+                // Determine steps based on distance
+                let steps = Math.floor(error / 8); 
                 
-                sendCommand(steps);
+                // --- DIRECTION FIX ---
+                // If it was moving opposite, we multiply by -1.
+                // CURRENT SETTING: Inverted
+                steps = steps * -1; 
+                
+                // Send command
+                send(steps);
             }
         }
     }
 
-    function sendCommand(steps) {
+    function send(steps) {
         const now = Date.now();
-        // Limit to 10 commands/sec
-        if (now - lastRequestTime > 100) {
+        // Throttle: Only send every 150ms to prevent Timeouts
+        if(now - lastTime > 150) {
             const ip = document.getElementById('ip').value;
-            // Use no-cors to avoid errors, we just want to fire the request
-            fetch(`http://${ip}/move?steps=${steps}`, { mode: 'no-cors' }).catch(e => {});
-            lastRequestTime = now;
+            // Use 'no-cors' mode (fire and forget)
+            fetch(`http://${ip}/move?steps=${steps}`, {mode: 'no-cors'}).catch(e=>{
+                // If this fails, IP is wrong or NodeMCU is busy
+                console.log("Connect Error"); 
+            });
+            lastTime = now;
         }
     }
 
     function centerMotor() {
         const ip = document.getElementById('ip').value;
-        fetch(`http://${ip}/stop`, { mode: 'no-cors' }).catch(e => {});
+        fetch(`http://${ip}/stop`, {mode: 'no-cors'});
     }
 
-    // Boot up
     init();
 </script>
 </body>
