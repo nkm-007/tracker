@@ -1,188 +1,232 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Face Tracker</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Person Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
-        #videoContainer { position: absolute; width: 100%; height: 100%; }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        body { margin: 0; background: #000; font-family: sans-serif; overflow: hidden; }
+        #container { position: relative; width: 100vw; height: 100vh; }
         
-        /* HUD Controls */
-        #hud {
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 20px;
-            display: flex; flex-direction: column; gap: 10px; align-items: center;
-            color: #00ff88; backdrop-filter: blur(5px); z-index: 999;
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        
+        /* Control Panel */
+        #ui {
+            position: absolute; bottom: 30px; left: 0; width: 100%;
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
+            z-index: 10;
         }
-        .row { display: flex; gap: 10px; align-items: center; }
-        input[type="text"] { width: 100px; padding: 5px; border-radius: 5px; border: none; text-align: center; }
-        button { padding: 8px 20px; border-radius: 20px; border: none; font-weight: bold; cursor: pointer; }
-        .btn-go { background: #00ff88; color: #000; }
-        .btn-stop { background: #ff4757; color: #fff; }
-        label { font-size: 12px; color: white; display: flex; align-items: center; gap: 5px; }
+        
+        .panel {
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 20px;
+            backdrop-filter: blur(5px); display: flex; gap: 10px; align-items: center;
+        }
+
+        input { 
+            padding: 10px; border-radius: 8px; border: none; 
+            width: 130px; text-align: center; background: rgba(255,255,255,0.9);
+        }
+        
+        button {
+            padding: 10px 20px; border-radius: 25px; border: none;
+            font-weight: bold; font-size: 14px; cursor: pointer;
+        }
+        
+        .btn-start { background: #00ff88; color: #000; }
+        .btn-rec { background: #ff4757; color: white; display: none; } /* Hidden until AI loads */
+        
+        .recording { animation: pulse 1.5s infinite; background: white; color: red; }
+        
+        #status {
+            color: #00ff88; font-size: 14px; text-shadow: 0 2px 4px rgba(0,0,0,1);
+            background: rgba(0,0,0,0.5); padding: 5px 15px; border-radius: 15px;
+        }
+        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
-<div id="videoContainer">
-    <video id="video" autoplay playsinline></video>
+<div id="container">
+    <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
-</div>
 
-<div id="hud">
-    <div class="row">
-        <input type="text" id="ip" placeholder="NodeMCU IP" value="192.168.0.105">
-        <input type="text" id="peerId" placeholder="Laptop ID (Optional)">
-    </div>
-    <div class="row">
-        <button class="btn-go" onclick="startTracking()">START</button>
-        <button class="btn-stop" onclick="stopTracking()">STOP</button>
-        <button style="background:#ffa502" onclick="resetMotor()">CENTER</button>
-    </div>
-    <div class="row">
-        <label><input type="checkbox" id="invertDir" checked> Invert Direction</label>
-        <div id="status">Ready</div>
+    <div id="ui">
+        <div id="status">Initializing AI...</div>
+        
+        <div class="panel">
+            <input type="text" id="ip" placeholder="NodeMCU IP" value="192.168.0.105">
+            <button class="btn-start" id="loadBtn" onclick="init()">Load Camera</button>
+            <button class="btn-rec" id="recBtn" onclick="toggleTracking()">● START REC</button>
+        </div>
     </div>
 </div>
 
 <script>
-    let model, video, canvas, ctx;
+    let video, canvas, ctx, model;
     let isTracking = false;
-    let peer = null;
-    let motorPosition = 0; // Virtual position of motor (-100 to 100)
     let lastRequestTime = 0;
+    
+    // Recording Variables
+    let mediaRecorder;
+    let recordedChunks = [];
+    let stream;
 
-    // Initialize Video
-    async function setupCamera() {
+    // 1. Setup Camera & Load AI
+    async function init() {
+        document.getElementById('status').innerText = "Requesting Camera...";
+        
         video = document.getElementById('video');
         canvas = document.getElementById('canvas');
         ctx = canvas.getContext('2d');
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        // Get Back Camera (Environment)
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
             audio: false
         });
+        
         video.srcObject = stream;
+        video.onloadedmetadata = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        };
+
+        document.getElementById('status').innerText = "Loading AI (Person Only)...";
+        document.getElementById('loadBtn').style.display = "none";
         
-        return new Promise(resolve => {
-            video.onloadedmetadata = () => {
-                resize();
-                resolve();
-            };
-        });
-    }
-
-    // Handle Resize/Rotate
-    function resize() {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-    }
-    window.addEventListener('resize', resize);
-
-    async function startTracking() {
-        const ip = document.getElementById('ip').value;
-        const pId = document.getElementById('peerId').value;
-        if(!ip) return alert("Enter IP");
-
-        document.getElementById('status').innerText = "Loading AI...";
-        await setupCamera();
-        model = await blazeface.load();
+        // Load COCO-SSD
+        model = await cocoSsd.load();
         
-        // Start PeerJS Stream if ID provided
-        if(pId) {
-            peer = new Peer();
-            peer.on('open', () => {
-                peer.call(pId, video.srcObject);
-                document.getElementById('status').innerText = "Streaming Active";
-            });
-        }
-
-        isTracking = true;
-        document.getElementById('status').innerText = "Tracking...";
-        detectLoop();
+        document.getElementById('status').innerText = "Ready to Track";
+        document.getElementById('recBtn').style.display = "block";
     }
 
-    function stopTracking() {
-        isTracking = false;
-        if(peer) peer.destroy();
-        document.getElementById('status').innerText = "Stopped";
-    }
-
-    function resetMotor() {
-        const ip = document.getElementById('ip').value;
-        fetch(`http://${ip}/reset`).catch(e=>{});
-        motorPosition = 0;
-    }
-
-    async function detectLoop() {
-        if(!isTracking) return;
-
-        const predictions = await model.estimateFaces(video, false);
+    // 2. Start/Stop Logic
+    function toggleTracking() {
+        const btn = document.getElementById('recBtn');
         
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        if (predictions.length > 0) {
-            const face = predictions[0];
-            const start = face.topLeft;
-            const end = face.bottomRight;
+        if (!isTracking) {
+            // START
+            isTracking = true;
+            btn.innerText = "■ STOP & SAVE";
+            btn.classList.add('recording');
+            document.getElementById('status').innerText = "Tracking Active";
             
+            // Start Recording
+            recordedChunks = [];
+            try {
+                // Try high quality VP9, fall back to standard
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+            } catch (e) {
+                mediaRecorder = new MediaRecorder(stream);
+            }
+            
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+            
+            mediaRecorder.onstop = saveAndUpload;
+            mediaRecorder.start();
+            
+            // Start Loop
+            trackLoop();
+            
+        } else {
+            // STOP
+            isTracking = false;
+            btn.innerText = "● START REC";
+            btn.classList.remove('recording');
+            document.getElementById('status').innerText = "Saving Video...";
+            
+            mediaRecorder.stop();
+        }
+    }
+
+    // 3. Save to Drive (via Share Sheet)
+    async function saveAndUpload() {
+        const blob = new Blob(recordedChunks, { type: 'video/mp4' });
+        const file = new File([blob], "person_tracking_test.mp4", { type: 'video/mp4' });
+
+        if (navigator.canShare && navigator.share) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: 'Tracking Test',
+                    text: 'Video recorded from AI Tracker'
+                });
+                document.getElementById('status').innerText = "Shared Successfully";
+            } catch (err) {
+                document.getElementById('status').innerText = "Share cancelled";
+            }
+        } else {
+            // Desktop Fallback
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = "tracking_test.mp4";
+            a.click();
+            document.getElementById('status').innerText = "Downloaded";
+        }
+    }
+
+    // 4. The AI Loop
+    async function trackLoop() {
+        if (!isTracking) return;
+
+        // Detect Objects
+        const predictions = await model.detect(video);
+        
+        // Filter: Only look for "person"
+        const person = predictions.find(p => p.class === 'person' && p.score > 0.6);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (person) {
             // Draw Box
             ctx.strokeStyle = "#00ff88";
             ctx.lineWidth = 4;
-            ctx.strokeRect(start[0], start[1], end[0] - start[0], end[1] - start[1]);
+            ctx.strokeRect(...person.bbox);
 
-            // --- SMART TRACKING LOGIC ---
-            
-            // 1. Calculate Center dynamically (works for any orientation)
+            // Logic: Keep person in center
+            const x = person.bbox[0];
+            const width = person.bbox[2];
+            const centerX = x + (width / 2);
             const screenCenter = canvas.width / 2;
-            const faceCenter = (start[0] + end[0]) / 2;
             
-            // 2. Calculate Deviation (Error)
-            const error = faceCenter - screenCenter;
+            const error = centerX - screenCenter; // Distance from center
             
-            // 3. Deadzone (Don't move if user is roughly centered)
-            if (Math.abs(error) > 30) {
+            // DEADZONE: If error is small (<50px), ignore it to stop jitter
+            if (Math.abs(error) > 50) {
                 
-                // 4. Proportional Movement Calculation
-                // If error is small (walking), move 1 step.
-                // If error is large (running), move 5 steps.
-                let stepSize = Math.floor(Math.abs(error) / 40); 
-                if (stepSize > 5) stepSize = 5; // Max jump limit
-                if (stepSize < 1) stepSize = 1;
-
-                // 5. Determine Direction
-                const invert = document.getElementById('invertDir').checked;
-                let direction = (error > 0) ? 1 : -1; 
+                // SMOOTHNESS MATH:
+                // Divide error by 10. 
+                // Ex: Error 200px -> Move 20 steps (Fast)
+                // Ex: Error 60px -> Move 6 steps (Slow)
+                let steps = Math.floor(error / 10);
                 
-                // NOTE: blazeface coordinates are not mirrored, but CSS is.
-                // Usually: Face > Center means face is on Right.
-                // We need to move Right (+).
-                if(invert) direction *= -1;
+                // Invert for Back Camera (Left on screen = Left in reality)
+                // If using Front Camera, you might need to multiply by -1
+                steps = -steps; 
 
-                // 6. Update Virtual Motor Position
-                motorPosition += (direction * stepSize);
-
-                // Clamp to limits (-100 to 100)
-                if (motorPosition > 100) motorPosition = 100;
-                if (motorPosition < -100) motorPosition = -100;
-
-                // 7. Send Command (Throttled to prevent flooding WiFi)
-                const now = Date.now();
-                if (now - lastRequestTime > 50) { // Max 20 commands per second
-                    const ip = document.getElementById('ip').value;
-                    // Send absolute target to NodeMCU
-                    fetch(`http://${ip}/update?target=${motorPosition}`, {mode: 'no-cors'}).catch(()=>{});
-                    lastRequestTime = now;
-                }
+                // Send to NodeMCU
+                sendCommand(steps);
             }
         }
 
-        requestAnimationFrame(detectLoop);
+        requestAnimationFrame(trackLoop);
+    }
+
+    function sendCommand(steps) {
+        const now = Date.now();
+        // Limit to 10 commands per second (100ms delay)
+        // This prevents choking the WiFi connection
+        if (now - lastRequestTime > 100) {
+            const ip = document.getElementById('ip').value;
+            fetch(`http://${ip}/move?steps=${steps}`, { mode: 'no-cors' }).catch(e => {});
+            lastRequestTime = now;
+        }
     }
 </script>
 </body>
